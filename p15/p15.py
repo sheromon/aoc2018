@@ -6,18 +6,20 @@ OFFSETS = np.array([[-1, 0], [0, -1], [0, 1], [1, 0]])
 
 
 class Battle:
-    def __init__(self, grid, elf_power=3):
+    def __init__(self, grid, elf_power=3, debug=False):
+        self.debug = debug
         self.round = 0
-        self.grid = grid
+        self.grid = np.copy(grid)
         elf_inds = np.where(grid == CHAR_TO_INT['E'])
         self.elf_list = [Elf(position, self, elf_power) for position in zip(*elf_inds)]
         goblin_inds = np.where(grid == CHAR_TO_INT['G'])
         self.goblin_list = [Goblin(position, self) for position in zip(*goblin_inds)]
+
         self.elf_deaths = 0
 
     def __repr__(self):
         str = 'Round %d\n' % self.round
-        creature_list = self.sort_creatures()
+        creature_list = sort_creatures(self.elf_list + self.goblin_list)
         creats_seen = 0
         for row in self.grid:
             str += ''.join([INT_TO_CHAR[val] for val in row]) + '   '
@@ -31,21 +33,22 @@ class Battle:
         return str
 
     def execute_round(self):
-        creature_list = self.sort_creatures()
-        for creature in creature_list:
+        if self.debug:
+            print(self)
+        creature_list = sort_creatures(self.elf_list + self.goblin_list)
+        for ind, creature in enumerate(creature_list):
             if creature.hit_points <= 0:
                 continue
-            if self.done:
-                return
             next_position = creature.get_next_move()
             if next_position:
                 creature.move(next_position)
             target = creature.get_attack_target()
             if target:
                 creature.attack(target)
-        # if self.done:
-        #     return
-        self.round += 1
+            if self.done:
+                break
+        if ind == len(creature_list) - 1:
+            self.round += 1
 
     @property
     def done(self):
@@ -54,13 +57,13 @@ class Battle:
     @property
     def outcome(self):
         total_hit_points = np.sum([creature.hit_points for creature in
-                                   self.sort_creatures()])
+                                   self.elf_list + self.goblin_list])
         return self.round * total_hit_points
 
-    def sort_creatures(self):
-        all_creatures = self.elf_list + self.goblin_list
-        positions = np.array([creat.position for creat in all_creatures])
-        return [all_creatures[ind] for ind in position_argsort(positions)]
+
+def sort_creatures(creatures):
+    positions = np.array([creat.position for creat in creatures])
+    return [creatures[ind] for ind in position_argsort(positions)]
 
 
 def position_argsort(positions):
@@ -68,6 +71,7 @@ def position_argsort(positions):
     return np.argsort(sort_vals)
 
 def position_argmin(positions):
+    # positions = np.array(positions)
     sort_vals = positions[:, 0] * np.max(positions) + positions[:, 1]
     return np.argmin(sort_vals)
 
@@ -92,15 +96,16 @@ class Creature:
         else:
             targets = self.battle.elf_list
         target_value = targets[0].value
-        target_cells = get_adjacent_cells(self.battle.grid, self.position, target_value)
-        if not target_cells:
+        cells = get_adjacent_cells(self.battle.grid, self.position, target_value)
+        if not cells:
             return None
         attack_candidates = []
         for target in targets:
-            if target.position in target_cells:
+            if target.position in cells and target.hit_points > 0:
                 attack_candidates += [target]
         if not attack_candidates:
-            raise RuntimeError("Couldn't find target at position %s" % str(target_cells[0]))
+            return None
+        attack_candidates = sort_creatures(attack_candidates)
         hit_points_list = [target.hit_points for target in attack_candidates]
         ind = np.argmin(hit_points_list)
         return attack_candidates[ind]
@@ -145,19 +150,31 @@ class Creature:
         adjacent_cells = get_adjacent_cells(self.battle.grid, self.position)
         if not adjacent_cells:
             return None
-        results = ()
+        distances = []
+        closest_cells = ()
         for cell in adjacent_cells:
-            results += (self.plan_path(cell, destination_cells),)
-        shortest_ind = np.argmin([distance for cells, distance in results])
-        if np.isinf(results[shortest_ind][1]):
+            reachable_cells, distance = self.plan_path(cell, destination_cells)
+            distances += [distance]
+            if not reachable_cells:
+                closest_cells += (None,)
+                continue
+            reachable_cells = list(reachable_cells)
+            first_cell_ind = position_argmin(np.array(reachable_cells))
+            closest_cells += (reachable_cells[first_cell_ind],)
+        min_dist = np.min(distances)
+        if np.isinf(min_dist):
             return None
-        else:
-            return adjacent_cells[shortest_ind]
+
+        candidates = zip(adjacent_cells, closest_cells, distances)
+        candidates = filter(lambda tup: tup[-1] == min_dist, candidates)
+        adjacent_cells, closest_cells, _ = zip(*candidates)
+        ind = position_argmin(np.stack(closest_cells))
+        return tuple(adjacent_cells[ind])
 
     def plan_path(self, position, destination_cells):
         distance = 0
         if position in destination_cells:
-            return position, distance
+            return {position}, distance
         current_cells = {(position,)}
         visited_cells = set()
         while True:
@@ -198,46 +215,34 @@ def get_adjacent_cells(grid, position, occupancy=0):
             if grid[coord[0], coord[1]] == occupancy]
 
 
-def p15a(grid):
-    battle = Battle(grid)
+def p15a(grid, debug=False):
+    battle = Battle(grid, debug=debug)
     while not battle.done:
         battle.execute_round()
     print(battle)
     print('Outcome:', battle.outcome)
-    return outcome
+    return battle.outcome
 
 
-def p15b(grid):
-    min_elf_power = 4
-    max_elf_power = 200
-    elf_power = min_elf_power
-    delta_power = np.inf
-    best_outcome = None
-    while delta_power:
-        # print("Testing power", elf_power)
-        battle = Battle(np.copy(grid), elf_power)
+def p15b(grid, debug=False):
+    elf_power = 4
+    while elf_power < 200:
+        battle = Battle(grid, elf_power, debug)
         while not battle.done:
             battle.execute_round()
             if battle.elf_deaths:
                 break
-        if battle.elf_deaths:
-            new_elf_power = elf_power + int(0.5 * (max_elf_power - elf_power))
-            min_elf_power = elf_power
-        else:
-            new_elf_power = min_elf_power + int(0.5 * (elf_power - min_elf_power))
-            max_elf_power = elf_power
-            best_outcome = battle.outcome
-        delta_power = elf_power - new_elf_power
-        elf_power = new_elf_power
-        # print("Elf deaths:", battle.elf_deaths)
-    print("Best outcome:", best_outcome)
+        if not battle.elf_deaths:
+            break
+        elf_power += 1
 
-    print("Elf power:", max_elf_power)
-    battle = Battle(np.copy(grid), max_elf_power)
-    while not battle.done:
-        battle.execute_round()
-    print(battle)
-    return best_outcome
+    if debug:
+        battle = Battle(grid, elf_power, debug=debug)
+        while not battle.done:
+            battle.execute_round()
+        print(battle)
+        print("Elf power was", elf_power)
+    return battle.outcome
 
 
 def parse_p15_input(fname):
@@ -251,13 +256,18 @@ def parse_p15_input(fname):
 
 
 if __name__ == '__main__':
-    # for test_number, outcome in zip([1, 2, 3, 4, 6], [27730, 36334, 39514, 27755, 18740]):
-    #     test_grid = parse_p15_input("p15_test_%d.txt" % test_number)
-    #     assert p15a(test_grid) == outcome
-    # p15_input = parse_p15_input("p15_input.txt")
-    # print("p15a:", p15a(p15_input))
-
-    for test_number, outcome in zip([1, 3, 4, 6], [4988, 31284, 3478, 1140]):
+    part1_answers = [27730, 36334, 39514, 27755, 28944, 18740]
+    for test_number, answer in zip(range(6), part1_answers):
         test_grid = parse_p15_input("p15_test_%d.txt" % test_number)
-        assert p15b(test_grid) == outcome
-    # print("p15b:", p15b(p15_input))
+        assert p15a(test_grid) == answer
+    p15_input = parse_p15_input("p15_input.txt")
+    print("p15a:", p15a(p15_input))
+
+    part2_answers = [4988, 31284, 3478, 6474, 1140]
+    for test_number, answer in zip([0, 2, 3, 4, 5], part2_answers):
+        test_grid = parse_p15_input("p15_test_%d.txt" % test_number)
+        if p15b(test_grid) != answer:
+            outcome = p15b(test_grid, debug=True)
+            import pdb; pdb.set_trace()
+            outcome = p15b(test_grid, debug=True)
+    print("p15b:", p15b(p15_input))
