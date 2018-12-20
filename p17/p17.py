@@ -12,13 +12,13 @@ class Grid:
 
     def __repr__(self):
         string = ''
-        for row in self.grid.T:
+        for row in self.grid[-120:, :200].T:
             string += ''.join(row)
             string += '\n'
         return string
 
     def set_up_grid(self):
-        grid_size = (self.bounds['x'][1] - self.bounds['x'][0] + 2,
+        grid_size = (self.bounds['x'][1] - self.bounds['x'][0] + 4,
                      self.bounds['y'][1] + 1)
         grid = np.empty(grid_size, dtype=np.str)
         grid[:] = '.'
@@ -33,7 +33,7 @@ class Grid:
         self.grid = grid
 
     def adjust_x(self, x):
-        return x - self.bounds['x'][0] + 1
+        return x - self.bounds['x'][0] + 2
 
     def fill(self):
         inds = np.where(self.grid == '+')
@@ -42,36 +42,43 @@ class Grid:
         self.fill_up(x, y)
 
     def fall(self, x, y):
-        next_char = ''
-        while (next_char != '#') and (y < self.bounds['y'][1]):
-            self.grid[x, y] = '|'
+        self.grid[x, y] = '|'
+        while y < self.bounds['y'][1] - 1:
             y += 1
-            next_char = self.grid[x, y]
-        return x, y - 1
+            this_char = self.grid[x, y]
+            next_char = self.grid[x, y + 1]
+            if (next_char == '#') or (this_char == '~'):
+                return x, y
+            self.grid[x, y] = '|'
+        return x, y
 
     def fill_right(self, x, y):
         next_char = ''
         below_char = ''
-        while (next_char != '#') and (below_char != '.') and \
-                (x < self.adjust_x(self.bounds['x'][1])):
+        while (next_char != '#') and (below_char != '.') \
+                and (below_char != '|') \
+                and (x < self.adjust_x(self.bounds['x'][1])):
             self.grid[x, y] = '~'
             x += 1
             next_char = self.grid[x, y]
             below_char = self.grid[x, y + 1]
-        if below_char == '.':
+        if (below_char == '.') or (below_char == '|'):
             self.fill_up(*self.fall(x, y))
+            return False
         return next_char == '#'
 
     def fill_left(self, x, y):
         next_char = ''
         below_char = ''
-        while (next_char != '#') and (below_char != '.') and (x > 0):
+        while (next_char != '#') and (below_char != '.') \
+                and (below_char != '|') and (x > 0):
             self.grid[x, y] = '~'
             x -= 1
             next_char = self.grid[x, y]
             below_char = self.grid[x, y + 1]
-        if below_char == '.':
+        if (below_char == '.') or (below_char == '|'):
             self.fill_up(*self.fall(x, y))
+            return False
         return next_char == '#'
 
     def fill_up(self, x, y):
