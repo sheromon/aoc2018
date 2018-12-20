@@ -12,10 +12,19 @@ class Grid:
 
     def __repr__(self):
         string = ''
-        for row in self.grid[-120:, :200].T:
+        for row in self.grid[-150:, :].T:
             string += ''.join(row)
             string += '\n'
         return string
+
+    def print_region(self, x, y):
+        string = ''
+        x_start = max(x - 50, 0)
+        y_start = max(y - 20, 0)
+        for row in self.grid[x_start:x + 50, y_start:y + 20].T:
+            string += ''.join(row)
+            string += '\n'
+        print(string)
 
     def set_up_grid(self):
         grid_size = (self.bounds['x'][1] - self.bounds['x'][0] + 4,
@@ -35,61 +44,63 @@ class Grid:
     def adjust_x(self, x):
         return x - self.bounds['x'][0] + 2
 
-    def fill(self):
+    def flow(self):
         inds = np.where(self.grid == '+')
         x, y = inds[0][0], inds[1][0]
-        x, y = self.fall(x, y)
-        self.fill_up(x, y)
+        self.fall(x, y)
 
     def fall(self, x, y):
-        self.grid[x, y] = '|'
-        while y < self.bounds['y'][1] - 1:
-            y += 1
-            this_char = self.grid[x, y]
-            next_char = self.grid[x, y + 1]
-            if (next_char == '#') or (this_char == '~'):
-                return x, y
-            self.grid[x, y] = '|'
-        return x, y
-
-    def fill_right(self, x, y):
-        next_char = ''
-        below_char = ''
-        while (next_char != '#') and (below_char != '.') \
-                and (below_char != '|') \
-                and (x < self.adjust_x(self.bounds['x'][1])):
-            self.grid[x, y] = '~'
-            x += 1
-            next_char = self.grid[x, y]
-            below_char = self.grid[x, y + 1]
-        if (below_char == '.') or (below_char == '|'):
-            self.fill_up(*self.fall(x, y))
-            return False
-        return next_char == '#'
-
-    def fill_left(self, x, y):
-        next_char = ''
-        below_char = ''
-        while (next_char != '#') and (below_char != '.') \
-                and (below_char != '|') and (x > 0):
-            self.grid[x, y] = '~'
-            x -= 1
-            next_char = self.grid[x, y]
-            below_char = self.grid[x, y + 1]
-        if (below_char == '.') or (below_char == '|'):
-            self.fill_up(*self.fall(x, y))
-            return False
-        return next_char == '#'
+        fall_inds = self.grid[x, y:] == '|'
+        fall_ind = np.argmax(fall_inds) if np.any(fall_inds) \
+            else len(fall_inds) - 1
+        stop_inds = np.isin(self.grid[x, y:], ['#', '~'])
+        stop_ind = np.argmax(stop_inds) if np.any(stop_inds) \
+            else len(stop_inds) - 1
+        end_ind = np.minimum(fall_ind, stop_ind)
+        self.grid[x, y:y + end_ind] = '|'
+        # if we find running water, this water will just join it,
+        # so nothing else needs to happen
+        if fall_ind <= stop_ind:
+            return
+        # if we find clay or still water, try to fill up the clay
+        self.fill_up(x, y + end_ind - 1)
 
     def fill_up(self, x, y):
-        if y == self.bounds['y'][1] - 1:
-            return
         wall_right = True
         wall_left = True
-        while wall_right and wall_left and (y > 0):
-            wall_right = self.fill_right(x, y)
-            wall_left = self.fill_left(x, y)
+        while wall_right and wall_left:
+            wall_right = self.fill_sideways(x, y, 1)
+            wall_left = self.fill_sideways(x, y, -1)
             y -= 1
+        if wall_right and not wall_left:
+            self.fill_sideways(x, y + 1, 1, '|')
+        if wall_left and not wall_right:
+            self.fill_sideways(x, y + 1, -1, '|')
+
+    def fill_sideways(self, x, y, direction, fill_char='~'):
+        if direction == 1:
+            start_ind = x
+            end_ind = self.adjust_x(self.bounds['x'][1] - 1)
+        else:
+            start_ind = x
+            end_ind = 0
+        row = self.grid[start_ind:end_ind:direction, y]
+        below = self.grid[start_ind:end_ind:direction, y + 1]
+        wall_ind = np.argmax(row == '#')
+        empty_inds = np.isin(below, ['.', '|'])
+        empty_ind = np.argmax(empty_inds) if np.any(empty_inds) \
+            else len(empty_inds) - 1
+        if (wall_ind < empty_ind) and (row[wall_ind] == '#'):
+            end_ind = start_ind + direction * wall_ind
+            self.grid[start_ind:end_ind:direction, y] = fill_char
+            return True
+        pdb.set_trace()
+        if below[empty_ind] == '.':
+            end_ind = start_ind + direction * empty_ind
+            self.grid[start_ind:end_ind:direction, y] = '|'
+            next_x = x + direction * empty_ind
+            self.fall(next_x, y)
+        return False
 
     def sum(self):
         return np.sum(self.grid[:, self.bounds['y'][0]:] == '~') + \
@@ -99,7 +110,7 @@ class Grid:
 
 def p17a(veins, bounds):
     grid = Grid(veins, bounds)
-    grid.fill()
+    grid.flow()
     pdb.set_trace()
     return grid.sum()
 
